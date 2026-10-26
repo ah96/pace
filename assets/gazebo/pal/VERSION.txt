@@ -1,0 +1,4 @@
+tiago_robot humble-devel f1c33c9 2026-04-24
+pmb2_robot humble-devel 116e8a9 2026-08-24
+pal_gripper humble-devel 485b535 2026-04-13
+pal_urdf_utils humble-devel fb38c85 2026-09-01

@@ -1,0 +1,19 @@
+# Core scientific stack
+numpy>=2.0
+pandas>=2.0
+matplotlib>=3.7
+seaborn>=0.13
+
+# Semantic / ontology layer
+networkx>=3.0
+rdflib>=7.0
+owlrl>=6.0
+pydantic>=2.0
+
+# Digital twin (pace/twin): world files and stills need Gazebo 11 + ROS 2 Humble, not pip
+imageio>=2.30
+pyyaml>=6.0
+
+
+# The optional prose narrative (pace.explanation.ChatCompletionsNarrator) talks to any
+# chat-completions server with the standard library; no provider package is needed.
