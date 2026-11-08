@@ -33,7 +33,7 @@ from pace.twin import plant_world as PW  # noqa: E402
 from pace.twin import render as R  # noqa: E402
 from pace.twin import robots as RB  # noqa: E402
 from pace.twin import sdf as S  # noqa: E402
-from scenarios.plant import ROBOTS, ZONE_HALF, build_world_from_spec, plant_spec  # noqa: E402
+from scenarios.plant import ROBOTS, build_world_from_spec, plant_spec  # noqa: E402
 
 LOW, MEDIUM, HIGH = "#2ca02c", "#e6a100", "#d62728"
 ROUTE_COLOURS = ["#1f5fa8", "#e26d1a", "#7b3fa0", "#2a9d8f"]
@@ -42,20 +42,24 @@ EFFORT_COLOUR = {"low": LOW, "medium": MEDIUM, "high": HIGH}
 RAW_DIR = Path("build/figs")
 #: the stills the paper shows (the pick mission is described in its text)
 PAPER_FIGURES = {"twin_overview"}
-PRETTY = {"door_state": "open door", "is_hazardous": "clear cordon",
-          "restricted": "authorise access", "is_accessible": "reopen aisle",
-          "blocked_width": "move staged pallets", "width": "widen",
-          "height": "raise the slab", "item_height": "restock lower",
+PRETTY = {"door_state": "open", "is_hazardous": "lift cordon",
+          "restricted": "authorize access", "is_accessible": "reopen aisle",
+          "blocked_width": "move pallets", "width": "widen",
+          "height": "raise", "item_height": "restock lower",
           "item_mass": "too heavy for the arm", "item_width": "too wide for the gripper",
           "slope_angle": "regrade the ramp", "crowd_density": "redirect people",
           "illumination": "lights on", "surface_type": "dry the floor",
           "obstacle_density": "clear the clutter"}
 SEG_NAMES = {"seg_dock_recv": "roller door", "seg_ship_sort": "fire door", "seg_disA_disB": "aisle A-B",
              "seg_dock_quar": "dock aisle", "seg_quar_diag": "monitoring zone", "seg_store_disB": "closed aisle",
-             "seg_wash_store": "VNA aisle", "seg_store_ship": "underpass", "seg_wash_disA": "wash aisle",
+             "seg_wash_store": "very narrow aisle", "seg_store_ship": "underpass", "seg_wash_disA": "wash aisle",
              "seg_disB_sort": "sorting aisle", "seg_dock_yard": "dock ramp", "seg_recv_diag": "main aisle",
              "seg_diag_disA": "aisle", "seg_quar_wash": "aisle", "module_rack": "module (upper rack)",
              "module_bench": "module (bench)", "pack_quarantine": "damaged pack", "tote_sorted": "tote"}
+ROBOT_NAMES = {"forklift_agv": "Forklift AGV", "tote_amr": "Tote carrier", "mobile_manipulator": "TIAGo",
+               "yard_ugv": "Yard UGV"}
+#: label size in points on the 8-inch canvas; printed at the 122 mm text width, about 0.6 of it
+FONT = 8.5
 
 
 def explain(spec, robot: str, start: str, goal: str, k: int = 3):
@@ -93,7 +97,8 @@ def marker_looks(spec, cors, name: str) -> PW.Look:
 
 
 def layout_callouts(items: List[Tuple[float, float, float]], width: float, top: float, row_h: float,
-                    gap: float | None = None, max_rows: int = 6) -> List[Tuple[float, float]]:
+                    gap: float | None = None, max_rows: int = 6,
+                    blocked: List[Tuple[float, float, float, float]] = ()) -> List[Tuple[float, float]]:
     """Places callout labels in rows along the top of a picture, each with a
     straight leader down to its marker.  ``items`` are (u, v, half width) in
     pixels, markers in any order; returns each label's centre.
@@ -103,6 +108,7 @@ def layout_callouts(items: List[Tuple[float, float, float]], width: float, top: 
     picture: it slides sideways past the labels of its row and past the
     leaders that cross the row, and its own leader may not run through a label
     in a deeper row, so no two labels overlap and no leader crosses a label.
+    ``blocked`` boxes (x0, x1, y0, y1), such as the zone names, are kept clear too.
     """
     gap = 0.008 * width if gap is None else gap
     margin = 0.01 * width
@@ -125,6 +131,7 @@ def layout_callouts(items: List[Tuple[float, float, float]], width: float, top: 
         for i in range(max_rows):
             y = top + i * row_h
             obst = [(a, b) for a, b, r in boxes if r == i]
+            obst += [(x0, x1) for x0, x1, y0, y1 in blocked if y0 < y + band and y1 > y - band]
             for ld in leaders:
                 xs = [q for q in (at(ld, y - band), at(ld, y + band)) if q is not None]
                 if xs:
@@ -135,7 +142,8 @@ def layout_callouts(items: List[Tuple[float, float, float]], width: float, top: 
                     moved = False
                     for a, b in obst:
                         if x - half < b + gap and x + half > a - gap:
-                            x, moved = (b + gap + half if step > 0 else a - gap - half), True
+                            # a hair past the obstacle, so rounding cannot leave x on its edge forever
+                            x, moved = (b + gap + half + 1e-6 if step > 0 else a - gap - half - 1e-6), True
                 if not lo <= x <= hi:
                     continue
                 crosses = any(y < top + r * row_h < v and a - gap < at((x, y, u, v), top + r * row_h) < b + gap
@@ -165,31 +173,37 @@ def overview(spec, robot: str, start: str, goal: str, out: Path, width: int = 24
     actual, cfs, graph = explain(spec, robot, start, goal, k)
     cors = PW.corridors(spec)
     routes = cfs[:max_routes]
-    extra: List[str] = []
-    for r, (seq, cf) in enumerate(routes):
-        xy = route_xy(spec, seq, graph)
-        extra.append(S.route_model(xy, f"route{r}", ROUTE_COLOURS[r], period=1.8, dash=1.1, width=0.55))
-    marks: Dict[str, Tuple[str, str, int]] = {}
+    order = ["low", "medium", "high"]
+    marks: Dict[str, Tuple[str, List[str], int]] = {}    # individual -> (effort, properties, route)
     for r, (seq, cf) in enumerate(routes):
         for c in cf.changes:
             if c.claim != "repair":
                 continue
-            key = c.individual_name
-            eff = c.effort()
-            if key not in marks or ["low", "medium", "high"].index(eff) > ["low", "medium", "high"].index(marks[key][0]):
-                marks[key] = (eff, c.property_name, r)
-    for name, (eff, prop, r) in marks.items():
-        look = marker_looks(spec, cors, name)
-        extra.append(S.halo_model(f"halo_{name}", look, EFFORT_COLOUR[eff], pad=0.25, width=0.22))
-        extra.append(S.beacon_model(f"beacon_{name}", look, EFFORT_COLOUR[eff]))
-    # robots
-    sz = spec.zone(start)
-    nxt = graph.nodes[routes[0][0][1]].position if routes else (sz.x + 1, sz.y)
-    yaw = math.atan2(nxt[1] - sz.y, nxt[0] - sz.x)
-    extra.append(RB.robot_static(robot, ROBOTS[robot], sz.x, sz.y, yaw, sz.level, label=f"r_{robot}"))
-    for rname, (zid, ryaw) in (others or {}).items():
-        z = spec.zone(zid)
-        extra.append(RB.robot_static(rname, ROBOTS[rname], z.x + 0.8, z.y - 0.8, ryaw, z.level, label=f"r_{rname}"))
+            eff, props, r0 = marks.get(c.individual_name, ("low", [], r))
+            if c.property_name not in props:
+                props = props + [c.property_name]
+            marks[c.individual_name] = (max(eff, c.effort(), key=order.index), props, r0)
+
+    def models() -> List[str]:
+        """What the render adds to the plant: routes, markers, robots (needs Gazebo's tools)."""
+        extra: List[str] = []
+        for r, (seq, cf) in enumerate(routes):
+            xy = route_xy(spec, seq, graph)
+            extra.append(S.route_model(xy, f"route{r}", ROUTE_COLOURS[r], period=1.8, dash=1.1, width=0.55))
+        for name, (eff, _props, _r) in marks.items():
+            look = marker_looks(spec, cors, name)
+            extra.append(S.halo_model(f"halo_{name}", look, EFFORT_COLOUR[eff], pad=0.25, width=0.22))
+            extra.append(S.beacon_model(f"beacon_{name}", look, EFFORT_COLOUR[eff]))
+        sz = spec.zone(start)
+        nxt = graph.nodes[routes[0][0][1]].position if routes else (sz.x + 1, sz.y)
+        yaw = math.atan2(nxt[1] - sz.y, nxt[0] - sz.x)
+        extra.append(RB.robot_static(robot, ROBOTS[robot], sz.x, sz.y, yaw, sz.level, label=f"r_{robot}"))
+        for rname, (zid, ryaw) in (others or {}).items():
+            z = spec.zone(zid)
+            extra.append(RB.robot_static(rname, ROBOTS[rname], z.x + 0.8, z.y - 0.8, ryaw, z.level,
+                                         label=f"r_{rname}"))
+        return extra
+
     h = PW.hall_rect(spec)
     cam = S.fit_camera((h.x0 - 1.0, h.y0 - 4.0, h.x1 + 1.0, h.y1 + 1.0), width, height, math.radians(yaw_deg),
                        pitch=math.radians(pitch_deg), top_m=PW.RACK_H, margin=0.01)
@@ -199,6 +213,7 @@ def overview(spec, robot: str, start: str, goal: str, out: Path, width: int = 24
         img = iio.imread(raw)
     else:
         RAW_DIR.mkdir(parents=True, exist_ok=True)
+        extra = models()
         img = R.render(lambda fdir: PW.build_world(spec, extra_models=extra, camera_xml=cam.sdf(fdir, rate=4.0)).world,
                        out=raw, frames=5, timeout=300)
     # ---- annotate
@@ -206,49 +221,60 @@ def overview(spec, robot: str, start: str, goal: str, out: Path, width: int = 24
     ax = fig.add_axes([0, 0, 1, 1])
     ax.imshow(img)
     ax.set_axis_off()
-    fs = 6.5
+    fs = FONT
+    grow = fs / 6.5                                      # spacing scales with the font
+    renderer = fig.canvas.get_renderer()
+    zone_boxes = []                                      # the zone names, which callouts keep clear of
     for zid in set(sum([seq for seq, _ in routes], [])):
         z = spec.zone(zid) if not zid.startswith("pick_") else None
         if z is None:
             continue
         u, v = cam.project([(z.x, z.y, 0.05)])[0]
-        ax.text(u, v, z.label.split(" (")[0], fontsize=fs, ha="center", va="center", color="#202022",
-                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.75))
+        name = ax.text(u, v, z.label.split(" (")[0], fontsize=fs, ha="center", va="center", color="#202022",
+                       bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85),
+                       zorder=4)                     # above the leaders, which pass behind it
+        bb = name.get_window_extent(renderer)
+        (x0, y0), (x1, y1) = ax.transData.inverted().transform([(bb.x0, bb.y0), (bb.x1, bb.y1)])
+        zone_boxes.append((min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)))
     placed = []
-    for name, (eff, prop, r) in marks.items():
+    for name, (eff, props, r) in marks.items():
         look = marker_looks(spec, cors, name)
         u, v = cam.project([(look.cx, look.cy, 1.6)])[0]
-        placed.append((u, v, name, eff, prop))
+        placed.append((u, v, name, eff, props))
     placed.sort()
     # callouts in rows along the top of the picture, each with a leader down to
     # its marker (see layout_callouts)
-    renderer = fig.canvas.get_renderer()
     pad_px = 0.25 * fs * fig.dpi / 72.0                   # the label box's padding
     items = []
-    for u, v, name, eff, prop in placed:
-        label = f"{SEG_NAMES.get(name, name)}: {PRETTY.get(prop, prop)} ({eff})"
+    for u, v, name, eff, props in placed:
+        label = f"{SEG_NAMES.get(name, name)}: {' + '.join(PRETTY.get(p, p) for p in props)} ({eff})"
         probe = ax.text(0, 0, label, fontsize=fs, weight="bold")
         half = probe.get_window_extent(renderer).width / 2 + pad_px + 1
         probe.remove()
         items.append((u, v, half, label, eff))
     spots = layout_callouts([(u, v, half) for u, v, half, _l, _e in items], width,
-                            top=0.045 * height, row_h=0.062 * height)
+                            top=0.045 * grow * height, row_h=0.062 * grow * height, blocked=zone_boxes)
     for (u, v, _h, label, eff), (x, y) in zip(items, spots):
-        ax.annotate(label, (u, v), xytext=(x, y), textcoords="data", fontsize=fs,
+        ax.annotate(label, (u, v), xytext=(x, y), textcoords="data", fontsize=fs, zorder=3,
                     ha="center", va="center", color="white", weight="bold",
                     bbox=dict(boxstyle="round,pad=0.25", fc=EFFORT_COLOUR[eff], ec="none", alpha=0.95),
                     arrowprops=dict(arrowstyle="-", color=EFFORT_COLOUR[eff], lw=1.2, shrinkA=0, shrinkB=0))
     # legend / question
-    q = title or f"{robot.replace('_', ' ')}: why can't you reach {goal.replace('_', ' ')} from {start}?"
-    ax.text(0.988, 0.03 + 0.055 * len(routes), q, transform=ax.transAxes, fontsize=fs + 1.5, va="bottom", ha="right",
+    def place(n: str) -> str:
+        if n.startswith("pick_"):
+            return next(f"the {it.label[0].lower()}{it.label[1:]}" for it in spec.items if it.node == n)
+        return spec.zone(n).label.split(" (")[0].lower()
+    q = title or f"{ROBOT_NAMES.get(robot, robot)}: why can't you reach {place(goal)} from the {place(start)}?"
+    line = 0.055 * grow                                   # height of one inset entry, in axes units
+    ax.text(0.988, 0.03 + line * len(routes), q, transform=ax.transAxes, fontsize=fs, va="bottom", ha="right",
             weight="bold", bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.9))
     for r, (seq, cf) in enumerate(routes):
         reps = [c for c in cf.changes if c.claim == "repair"]
         acts = sum(c.is_actionable() for c in reps)
         txt = (f"route {r + 1}: {' > '.join(n.replace('_', ' ') for n in seq)}\n"
-               f"   {len(reps)} repair(s), {acts} actionable"
-               + (f"; {len(reps) - acts} structural" if len(reps) > acts else ""))
-        ax.text(0.988, 0.03 + 0.055 * (len(routes) - 1 - r), txt, transform=ax.transAxes, fontsize=fs, va="bottom",
+               f"   {len(reps)} repair{'s' if len(reps) != 1 else ''}, {acts} actionable"
+               + (f", {len(reps) - acts} structural" if len(reps) > acts else ""))
+        ax.text(0.988, 0.03 + line * (len(routes) - 1 - r), txt, transform=ax.transAxes, fontsize=fs - 0.5, va="bottom",
                 ha="right", color=ROUTE_COLOURS[r],
                 bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="none", alpha=0.85))
     fig.savefig(out, dpi=300)
