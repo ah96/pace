@@ -124,11 +124,11 @@ def build_navigation_ontology() -> Ontology:
     Construct and return the navigation domain ontology.
 
     This function is the single source of truth for:
-      - The class hierarchy (20 classes)
-      - The property vocabulary (22 data properties)
+      - The class hierarchy (21 classes)
+      - The property vocabulary (30 data properties)
 
     It does NOT create any individual instances - that is the responsibility
-    of the scenario builders (see scenarios/hospital.py and scenarios/warehouse.py).
+    of the scenario builders (see scenarios/plant.py).
 
     Class hierarchy
     ---

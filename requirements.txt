@@ -1,8 +1,8 @@
 # Core scientific stack
 numpy>=2.0
+scipy>=1.10        # pace/twin/tiago_fk.py (the TIAGo reach solver)
 pandas>=2.0
 matplotlib>=3.7
-seaborn>=0.13
 
 # Semantic / ontology layer
 networkx>=3.0
@@ -13,6 +13,10 @@ pydantic>=2.0
 # Digital twin (pace/twin): world files and stills need Gazebo 11 + ROS 2 Humble, not pip
 imageio>=2.30
 pyyaml>=6.0
+pillow>=10.0       # experiments/make_mission_videos.py (and ffmpeg on the PATH)
+
+# Tests
+pytest>=7.0
 
 
 # The optional prose narrative (pace.explanation.ChatCompletionsNarrator) talks to any

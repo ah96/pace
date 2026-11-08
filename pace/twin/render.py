@@ -3,8 +3,8 @@
 The camera model (:meth:`pace.twin.sdf.Camera.sdf`) saves frames to a
 directory; we start the server, wait until a few frames are in (the first
 ones may miss textures), keep one, and kill the server by process group.
-Rendering needs an OpenGL display (``DISPLAY``): the laptop's and the lab
-PC's ``:0`` both work over SSH.
+Rendering needs an OpenGL display (``DISPLAY``); a local ``:0`` also works
+over SSH.
 """
 
 from __future__ import annotations

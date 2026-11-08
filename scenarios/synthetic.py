@@ -3,10 +3,10 @@ scenarios/synthetic.py
 ======================
 Procedurally generated facilities, for measuring how the method scales.
 
-The hospital and warehouse scenarios are hand-authored to exercise particular
-blocking conditions, which is what makes them useful for the results table and
-useless for a scaling study: there are only nine waypoints, and any runtime
-measured on them says nothing about a real building. This module generates
+The authored plant (scenarios/plant.py) is hand-built to exercise particular
+blocking conditions, which is what makes it useful for the results table and
+useless for a scaling study: it has eleven zones, and any runtime measured on
+it says nothing about a large facility. This module generates
 graphs of arbitrary size with the same property vocabulary, so runtime can be
 plotted against the one variable that matters.
 

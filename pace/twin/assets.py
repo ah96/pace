@@ -12,7 +12,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "assets" / "gazebo"
-DATA = ROOT / "data"
 
 
 class A:
@@ -20,13 +19,10 @@ class A:
 
     FUEL_DIR = ASSETS / "fuel"
     PAL_DIR = ASSETS / "pal"
-    FUEL = {"chair": "WoodenChair", "table": "Table", "desk": "Desk", "bookshelf": "Bookshelf",
-            "cabinet": "Cabinet", "couch": "Sofa", "box": "Cardboard_box", "cart": "Utility_Cart",
-            "bin": "TrashBin", "vending_machine": "VendingMachine", "person": "FemaleVisitor",
-            "nurse": "Nurse", "scrubs": "Scrubs"}
-    ALIASES = {"cardboard_box": "Cardboard_box", "person_standing": "Standing_person",
-               "hinged_door": "Hinged_door", "door_handle": "Door_handle"}
-    STRETCH = {"table", "desk", "bookshelf", "cabinet", "couch", "box", "cart"}
+    FUEL = {"table": "Table", "desk": "Desk", "cabinet": "Cabinet", "box": "Cardboard_box",
+            "bin": "TrashBin", "person": "FemaleVisitor", "nurse": "Nurse", "scrubs": "Scrubs"}
+    ALIASES = {"cardboard_box": "Cardboard_box"}
+    STRETCH = {"table", "desk", "cabinet", "box"}
     FACING = {"person": -1.5708, "nurse": -1.5708, "scrubs": -1.5708}
 
     @staticmethod
@@ -35,5 +31,4 @@ class A:
 
     @staticmethod
     def model_path() -> str:
-        extra = [str(p) for p in (DATA / "aws" / "small-warehouse" / "models",) if p.exists()]
-        return os.pathsep.join([str(A.FUEL_DIR), str(A.PAL_DIR), *extra, "/usr/share/gazebo-11/models"])
+        return os.pathsep.join([str(A.FUEL_DIR), str(A.PAL_DIR), "/usr/share/gazebo-11/models"])

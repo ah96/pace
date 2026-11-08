@@ -28,6 +28,7 @@ pace/                    the framework
   counterfactual.py      blocking and cost attribution, verified repair sets, greedy and exhaustive
   explanation.py         the three-layer report
   evaluation.py          ground truth, task types, baselines (incl. DiCE-style recourse), metrics
+  orchestrator.py        PaceNavigator: plan a route, then explain the alternatives
   twin/                  the Gazebo Classic 11 + ROS 2 Humble + Nav2 digital twin
     plant_world.py       one PlantSpec -> SDF world (racking, doors, cordons, staged pallets,
                          underpass, ramp, people), Nav2 map, places
@@ -38,7 +39,8 @@ pace/                    the framework
     tiago_control.py     TIAGo with a live arm and gripper (ros2_control in Gazebo)
     moveit/              PAL's MoveIt configuration for TIAGo (vendored) and move_group's parameters
     render.py, sdf.py    stills through gzserver's camera; SDF builders
-    fetch.py             AWS RoboMaker small warehouse and CC0 Fuel props into data/
+    assets.py            paths of the vendored models (assets/gazebo/)
+    nav2_params_base.yaml, fastdds_udp_only.xml   Nav2's parameters; the Fast DDS UDP-only profile
 scenarios/
   plant.py               the remanufacturing plant (11 zones, 14 passages, 4 items, 4 robots)
                          and the generator of plants nobody tuned (random_plant_spec)
@@ -46,6 +48,7 @@ scenarios/
 experiments/
   run_pace.py            the semantic benchmark -> results/*.csv
   make_results_table.py  the paper's table from the CSVs
+  make_paper_numbers.py  every number the paper quotes (numbers.tex) from the CSVs
   run_twin.py            the twin protocol (every selected route before/after its repair)
   run_missions.py        the pick missions (Nav2 + MoveIt), before/after a restock
   run_reach_sweep.py     TIAGo picks a module or a tote at 17 heights, against PACE's reach verdict
@@ -56,6 +59,7 @@ experiments/
   make_twin_figures.py   annotated explanation stills (the qualitative figures)
   make_fleet_figure.py   the fleet in the passages that constrain it
   run_scaling.py         runtime vs plant size
+results/                 the paper's result files (results/README.md)
 assets/gazebo/           vendored Fuel models, TIAGo, and the fleet's meshes (LICENSES.md)
 tests/                   137 tests
 ```
@@ -73,6 +77,8 @@ and Nav2 (`ros-humble-navigation2 ros-humble-nav2-bringup`); stills need an Open
 (`DISPLAY=:0`). Pick missions with MoveIt 2 additionally need
 `ros-humble-moveit ros-humble-ros2-control ros-humble-ros2-controllers ros-humble-gazebo-ros2-control`,
 and `ros-humble-gazebo-model-attachment-plugin` to lift what TIAGo grips.
+Source ROS before activating the venv, so that `rclpy` imports and the venv's packages
+take precedence: `source /opt/ros/humble/setup.bash && source .venv/bin/activate`.
 
 ## The plant, explained
 
@@ -81,10 +87,12 @@ PYTHONPATH=. python -m scenarios.plant      # every robot asked why it cannot re
 ```
 
 For the forklift AGV the northern route needs three low-effort actions (raise the roller door,
-move the staged pallets, open the fire door) and the southern route needs construction (a
-very-narrow aisle, an underpass too narrow and too low); the tote carrier only hears about the
-doors; the mobile manipulator opens the doors itself. A mission to the module on the upper
-rack adds "restock it lower" to the list; a robot without an arm gets no repair at all.
+move the staged pallets, open the fire door) and the southern route needs the cordon lifted plus
+construction (widen the very-narrow aisle, widen and raise the underpass); the tote carrier fits
+every passage but is stopped by the doors, the cordon, the restricted passage and the closed
+aisle; the mobile manipulator opens the doors itself and has a route. Missions are explained the
+same way (`explain_task` with an item's `pick_*` node as the goal): for TIAGo, the module on the
+upper rack adds "restock it lower"; a robot without an arm gets no repair at all.
 
 ## The model in detail
 
@@ -168,21 +176,38 @@ export PACE_LLM_MODEL=<model name>                  # and, for hosted providers,
 ```
 
 ```python
-from pace import ExplanationGenerator, ChatCompletionsNarrator
+from pace import PaceNavigator, ExplanationGenerator, ChatCompletionsNarrator
+from scenarios.plant import build_plant_world
+onto, graph, agents = build_plant_world()
+path, explanation = PaceNavigator(onto, graph).navigate("dock", "shipping", agents["mobile_manipulator"], explain=True)
 explainer = ExplanationGenerator(narrator=ChatCompletionsNarrator())
 print(explainer.format_report(explanation, narrative=True))
 ```
 
 ## Semantic benchmark
 
+The paper's result files are in `results/` (`results/README.md`). The paper's numbers and its
+Table 1 are regenerated from them directly:
+
+```bash
+PYTHONPATH=. python experiments/make_paper_numbers.py --authored results/plant_allpairs.csv \
+    --generated results/generated_allpairs.csv.gz --twin results/twin_episodes.csv \
+    --out build/numbers.tex                                    # every number in the paper's text
+PYTHONPATH=. python experiments/make_results_table.py --input results/plant_allpairs.csv \
+    --second results/generated_allpairs.csv.gz --include pace pace-opt recourse unconstrained semantic \
+    --output build/results_table.tex                           # the paper's Table 1
+```
+
+To re-run the benchmark (the generated plants take a few hours on one core; shard them with
+`--plants N --plant-seed0 S` and concatenate the CSVs):
+
 ```bash
 PYTHONPATH=. python experiments/run_pace.py --all-pairs --output results/plant_allpairs.csv
 PYTHONPATH=. python experiments/run_pace.py --all-pairs --only-plants --plants 30 \
-    --output results/generated_allpairs.csv --methods pace pace-opt pace-noattr pace-pooled recourse unconstrained semantic random
-PYTHONPATH=. python experiments/make_results_table.py --input results/plant_allpairs.csv \
-    --second results/generated_allpairs.csv --include pace pace-opt recourse unconstrained semantic \
-    --no-filter-rows --output build/results_table.tex          # paste over the tabular in main.tex
+    --output results/generated_allpairs.csv                    # then pass this file as --generated
 ```
+
+Every column except the runtimes reproduces exactly.
 
 Tasks are every connected (robot, start, goal) triple, missions included, grouped into five
 types: feasible with a deviation worth explaining, feasible with nothing to change, infeasible

@@ -42,7 +42,7 @@ from pydantic import ConfigDict, field_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 from .config import DEFAULT_CONFIG, NavCostConfig
-from .domain import AffordanceType, DoorState, MobilityType, SurfaceType
+from .domain import AffordanceType, DoorState, SurfaceType
 from .ontology import OntologyIndividual
 
 
@@ -522,18 +522,6 @@ class AffordanceReasoner:
     # Cost derivation
     # ------------------------------------------------------------------
 
-    # Surface friction cost adders (in cost-distance units added to edge length)
-    # Calibrated so that a WET floor adds ~14% overhead over a 10 m corridor.
-    _SURFACE_COST: Dict[str, float] = {
-        SurfaceType.SMOOTH.value:   0.0,
-        SurfaceType.TILED.value:    0.0,
-        SurfaceType.CARPETED.value: 0.3,
-        SurfaceType.ROUGH.value:    0.6,
-        SurfaceType.WET.value:      1.4,   # slip risk → extra caution → slower
-        SurfaceType.GRAVEL.value:   0.9,
-        SurfaceType.GRASS.value:    0.7,
-    }
-
     def navigation_cost(
         self,
         entity:        OntologyIndividual,
@@ -564,7 +552,6 @@ class AffordanceReasoner:
         result = self.compute(entity, agent)
         af = set(result.affordances)
         e  = entity.properties
-        a  = agent.properties
 
         # An item: the mission's last leg.  Reach, grasp and lift are each a
         # hard condition; the leg then costs its approach plus the handling.
@@ -590,11 +577,11 @@ class AffordanceReasoner:
         if door_state == DoorState.CLOSED.value and AffordanceType.OPENABLE not in af:
             return math.inf, result
 
-        # Slope check: if slope exceeds limit, CLIMBABLE will be absent.
+        # Slope check: CLIMBABLE is absent above the robot's rated slope and,
+        # for a wheeled robot, on any stair-like angle; either blocks the edge.
         slope = e.get("slope_angle", cfg.default_slope_angle)
-        if not cfg.slope_within_limit(e, a):
-            if AffordanceType.CLIMBABLE not in af:
-                return math.inf, result
+        if AffordanceType.CLIMBABLE not in af:
+            return math.inf, result
 
         # Soft cost contributions
         cost = base_distance

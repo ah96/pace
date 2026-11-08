@@ -13,7 +13,7 @@ Wires together all subsystems:
 Usage pattern
 -------------
 1. Build an Ontology via build_navigation_ontology() and populate it with
-   space individuals (see scenarios/hospital.py for a worked example).
+   space individuals (see scenarios/plant.py for a worked example).
 2. Build a NavigationGraph with NavNode and NavEdge objects.
 3. Construct PaceNavigator(onto, graph).
 4. Call navigate(start, goal, agent) to get (NavPath, NavigationExplanation).
@@ -30,8 +30,8 @@ Do not share one instance across concurrent requests.
 
 from __future__ import annotations
 
-import math
-from typing import Dict, List, Optional, Tuple, Type
+import logging
+from typing import List, Optional, Tuple, Type
 
 from .affordance import AffordanceReasoner
 from .counterfactual import Counterfactual, CounterfactualEngine
@@ -43,7 +43,7 @@ from .ontology import Ontology, OntologyIndividual
 
 class PaceNavigator:
     """
-    Top-level façade for the ontofact_nav framework.
+    Top-level façade for the PACE framework.
 
     Constructs and owns all subsystem instances.  External callers interact
     only with this class - the internal subsystem APIs are considered private.
@@ -130,7 +130,7 @@ class PaceNavigator:
         )
 
         if not paths:
-            print(f"[PaceNavigator] No feasible path: {start} → {goal}")
+            logging.getLogger(__name__).info("no feasible path: %s -> %s", start, goal)
             return NavPath.infeasible(), None
 
         chosen = paths[0]   # lowest-cost path (Yen's returns sorted order)

@@ -1,4 +1,7 @@
 <?xml version="1.0"?>
+<!-- Modified from PAL Robotics' tiago_description (tiago_robot, Apache License 2.0;
+     see pal/LICENSE.tiago_robot): the arm, torso, head and gripper joints are frozen in a
+     tucked posture. -->
 <robot name="tiago">
   <material name="Blue">
     <color rgba="0.0 0.0 0.8 1.0" />

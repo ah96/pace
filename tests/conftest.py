@@ -37,7 +37,7 @@ DEFAULT_SPACE = dict(
 
 @pytest.fixture
 def onto():
-    """A fresh navigation ontology (20 classes, 22 properties, no individuals)."""
+    """A fresh navigation ontology (21 classes, 30 properties, no individuals)."""
     return build_navigation_ontology()
 
 

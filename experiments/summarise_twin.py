@@ -27,7 +27,9 @@ def main() -> None:
     rep = df[df.kind == "repair"]
     before = rep[rep.phase == "before"].set_index(["robot", "route"])
     after = rep[rep.phase == "after"].set_index(["robot", "route"])
-    both = before.join(after, lsuffix="_b", rsuffix="_a", how="inner")
+    # add_suffix rather than join(lsuffix=, rsuffix=), which newer pandas deprecates and pandas 2
+    # (Python 3.10 / ROS Humble) has no replacement for
+    both = before.add_suffix("_b").join(after.add_suffix("_a"), how="inner")
     verified = both[(~both.arrived_b) & (both.arrived_a)]
     refuted = both[(~both.arrived_b) & (~both.arrived_a)]
     passable = both[both.arrived_b]

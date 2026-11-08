@@ -1,21 +1,18 @@
-"""Emit the LaTeX body of the results table straight from the results CSV.
+"""Emit the LaTeX body of the results table straight from the results CSVs.
 
 The table in the paper used to be typed by hand, which is how it came to
 aggregate one row block by taking a maximum over three baselines and another by
 taking a mean. Generating it removes the opportunity.
 
     PYTHONPATH=. python experiments/make_results_table.py \\
-        --input results/pace_results_allpairs.csv \\
+        --input results/plant_allpairs.csv --second results/generated_allpairs.csv.gz \\
+        --include pace pace-opt recourse unconstrained semantic \\
         --output build/results_table.tex
 
 Layout: one row per method, column groups per task type, and within each group
 only the metrics that are defined and informative for it. A block of four
 separate sub-tables would be more uniform and would not fit the page, and most
 of what it would add is columns of n/a.
-
-Actionability-filtered variants are folded together: the generator groups them
-by their rounded metrics and emits one row per distinct behaviour, so a filter
-row is printed once for however many baselines behave identically under it.
 """
 
 from __future__ import annotations
@@ -27,21 +24,14 @@ import pandas as pd
 
 LABEL = {
     "pace": r"\pace", "pace-opt": r"\pace-Opt",
-    "pace-noattr": r"\pace, blockers only", "pace-rndprio": r"\pace, order shuffled",
-    "pace-pooled": r"\pace, claims pooled",
-    "recourse": "Recourse",
-    "unconstrained": "Unconstrained",
-    "unconstrained-sets": r"Unconstr.\ sets $\leq$3", "semantic": "Semantic",
-    "distance": "Distance", "occupancy": "Occupancy", "random": "Random",
+    "pace-noattr": r"\pace, blockers only", "pace-pooled": r"\pace, claims pooled",
+    "recourse": "Recourse", "unconstrained": "Unconstrained", "semantic": "Semantic",
+    "random": "Random",
 }
 
 #: Rows that are ablations of PACE rather than competing methods. They are set
-#: below a rule so a reader does not read them as baselines.
-ABLATIONS = ("pace-noattr", "pace-rndprio", "pace-pooled")
-SHORT = {
-    "recourse": "Recourse", "unconstrained": "Unconstr.", "semantic": "Semantic",
-    "distance": "Dist.", "occupancy": "Occ.", "random": "Rand.",
-}
+#: below the others so a reader does not read them as baselines.
+ABLATIONS = ("pace-noattr", "pace-pooled")
 
 #: (task type, CSV column) pairs in the order they appear across the table.
 COLUMNS = [
@@ -73,19 +63,7 @@ def cells(agg: dict, method: str) -> list[str]:
 def aggregate(df: pd.DataFrame) -> dict:
     """Per-method means per task type, plus how many tasks each type holds."""
     metrics = sorted({c for _, c in COLUMNS} | {"runtime_ms"})
-
-    # What identifies one task. Floor-plan worlds all carry scenario
-    # "floorplan" and reuse node ids r0, r1, ..., so without the plan the same
-    # (robot, start, goal) triple in forty different buildings would collapse to
-    # one task and every count in the header would be forty times too small.
-    key = ["scenario", "agent", "start", "goal"]
-    if "plan_id" in df.columns:
-        key.insert(1, "plan_id")
-    # Pooled seeds re-run the same task under different sampled properties;
-    # each draw is its own task instance, and the counts should say so.
-    if "property_seed" in df.columns:
-        key.insert(1, "property_seed")
-
+    key = ["scenario", "agent", "start", "goal"]          # what identifies one task
     agg: dict = {"_tasks": {}}
     for cat in {c for c, _ in COLUMNS}:
         sub = df[df.cat == cat]
@@ -95,40 +73,20 @@ def aggregate(df: pd.DataFrame) -> dict:
     return agg
 
 
-def block(agg: dict, wanted, no_filter_rows: bool,
-          filter_rows_for=None) -> list:
-    """The body rows for one benchmark, ablations and filter rows included."""
+def block(agg: dict, wanted) -> list:
+    """The body rows for one benchmark: methods first, then the ablations."""
     present = [m for m in wanted if m in agg[COLUMNS[0][0]].index]
-
-    lines = [f"{LABEL[m]} & " + " & ".join(cells(agg, m)) + r" \\"
-             for m in present if m not in ABLATIONS]
-
-    for m in [m for m in present if m in ABLATIONS]:
-        lines.append(f"{LABEL[m]} & " + " & ".join(cells(agg, m)) + r" \\")
-
-    groups: dict = {}
-    if not no_filter_rows:
-        for m in (filter_rows_for if filter_rows_for is not None else present):
-            act = f"{m}-act"
-            if act not in agg[COLUMNS[0][0]].index:
-                continue
-            row = tuple(cells(agg, act)[:-1])
-            if row == tuple(cells(agg, m)[:-1]):
-                continue
-            groups.setdefault(row, []).append(m)
-    for row, members in groups.items():
-        names = "/".join(SHORT.get(m, LABEL[m]) for m in members)
-        runtime = max(float(cells(agg, f"{m}-act")[-1]) for m in members)
-        lines.append(f"{names} $+$ filter & " + " & ".join(row)
-                     + f" & {runtime:.0f}" + r" \\")
-    return lines
+    ordered = [m for m in present if m not in ABLATIONS] + [m for m in present if m in ABLATIONS]
+    return [f"{LABEL[m]} & " + " & ".join(cells(agg, m)) + r" \\" for m in ordered]
 
 
 def counts(agg: dict) -> str:
     """The five task-type counts, for the block's own heading row."""
     n = agg["_tasks"]
-    return (f"{n['infeasible, actionable']}/{n['infeasible, structural']}/"
-            f"{n['feasible, deviation']}/{n['feasible, no change']}/{n['infeasible, unrepairable']}")
+    fmt = lambda c: f"{n[c]:,}".replace(",", "{,}")       # 3{,}052, as in the text
+    return "/".join(fmt(c) for c in ("infeasible, actionable", "infeasible, structural",
+                                     "feasible, deviation", "feasible, no change",
+                                     "infeasible, unrepairable"))
 
 
 def main() -> None:
@@ -143,21 +101,9 @@ def main() -> None:
     p.add_argument("--labels", nargs=2, default=None,
                    help="Block labels for --input and --second.")
     p.add_argument("--include", nargs="+", default=None,
-                   help="Restrict the table to these methods, in this order. "
-                        "Used for the compact external-benchmark table, where "
-                        "the sanity-floor rankers add nothing a reader needs.")
+                   help="Restrict the table to these methods, in this order.")
     p.add_argument("--include-second", nargs="+", default=None,
-                   help="Method list for the --second block, when it should "
-                        "differ from --include. The sanity floors earn their "
-                        "row once; repeating them in the second block costs "
-                        "lines the page does not have.")
-    p.add_argument("--no-filter-rows", action="store_true",
-                   help="Omit the actionability-filtered block.")
-    p.add_argument("--filter-rows-for", nargs="+", default=None,
-                   help="Show filtered variants only for these methods. The "
-                        "filtered sanity floors repeat the verifying methods' "
-                        "signature; one row per behaviour still holds, this "
-                        "just narrows whose behaviour is worth a row.")
+                   help="Method list for the --second block, when it should differ from --include.")
     args = p.parse_args()
 
     agg = aggregate(pd.read_csv(args.input))
@@ -194,19 +140,13 @@ def main() -> None:
 
     def heading(label: str, agg_: dict) -> str:
         return (r"\midrule" + "\n" + r"\multicolumn{9}{@{}l}{\itshape " + label
-                + r", " + counts(agg_) + r" tasks by type} \\")
+                + r", " + counts(agg_) + r" tasks per type} \\")
 
     labels = args.labels or ["The authored plant", "Generated plants"]
-    lines = [heading(labels[0], agg)] + block(agg, wanted, args.no_filter_rows,
-                                              filter_rows_for=args.filter_rows_for)
+    lines = [heading(labels[0], agg)] + block(agg, wanted)
     if args.second:
         agg2 = aggregate(pd.read_csv(args.second))
-        lines += [heading(labels[1], agg2)]
-        # The filtered variants are omitted from the second block: what they
-        # demonstrate -- that giving a ranker the actionable/structural split
-        # trades false advice for none -- is established once in the first, and
-        # repeating it costs four rows a page cannot spare.
-        lines += block(agg2, args.include_second or wanted, no_filter_rows=True)
+        lines += [heading(labels[1], agg2)] + block(agg2, args.include_second or wanted)
 
     body = "\n".join([header] + lines + [r"\bottomrule", r"\end{tabular}"])
 

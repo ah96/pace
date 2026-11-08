@@ -43,12 +43,10 @@ from .navigation     import (
 from .counterfactual import CounterfactualEngine, Counterfactual, PropertyChange
 from .explanation    import ExplanationGenerator, NavigationExplanation, ChatCompletionsNarrator
 from .orchestrator   import PaceNavigator
-from .visualization  import draw_navigation_graph
 
 __all__ = [
     "NavCostConfig",
     "DEFAULT_CONFIG",
-    "draw_navigation_graph",
     "PaceNavigator",
     "build_navigation_ontology",
     "Ontology",

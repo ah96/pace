@@ -9,7 +9,7 @@ text projected onto the right spot.
 
     PYTHONPATH=. DISPLAY=:0 python experiments/make_twin_figures.py --out build/figures
 
-Rendering needs an OpenGL display (the laptop's or the lab PC's :0).
+Rendering needs an OpenGL display (e.g. DISPLAY=:0).
 """
 
 from __future__ import annotations

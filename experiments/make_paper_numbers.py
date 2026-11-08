@@ -11,7 +11,8 @@ cannot leave a stale number behind.
 from __future__ import annotations
 
 import argparse
-import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -19,8 +20,7 @@ import pandas as pd
 CATS = {"act": "infeasible, actionable", "struct": "infeasible, structural", "dev": "feasible, deviation",
         "none": "feasible, no change", "unrep": "infeasible, unrepairable"}
 METHODS = {"Pace": "pace", "PaceOpt": "pace-opt", "Rec": "recourse", "Unc": "unconstrained", "Sem": "semantic",
-           "Rnd": "random", "PaceNoattr": "pace-noattr", "PacePooled": "pace-pooled",
-           "RecAct": "recourse-act", "UncAct": "unconstrained-act"}
+           "Rnd": "random", "PaceNoattr": "pace-noattr", "PacePooled": "pace-pooled"}
 METRICS = {"R": "recall_at_k", "Act": "actionable_fraction", "Feas": "feasibility_recovery",
            "Rec": "num_returned", "Ms": "runtime_ms"}
 
@@ -100,11 +100,13 @@ def main() -> None:
                 out.append(macro(prefix + name, "--"))
     twin_names = ("twinroutes", "twinverified", "twinrefuted", "twinpassable", "twinfeasible", "twinsound",
                   "twinnamed", "twinblocked")
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     if Path(a.twin).exists():
-        import subprocess, sys
         tex = Path(a.out).with_name("twin_numbers.tex")
-        subprocess.run([sys.executable, "experiments/summarise_twin.py", "--input", a.twin, "--tex", str(tex)],
-                       check=True, capture_output=True)
+        res = subprocess.run([sys.executable, str(Path(__file__).with_name("summarise_twin.py")),
+                              "--input", a.twin, "--tex", str(tex)], capture_output=True, text=True)
+        if res.returncode:
+            sys.exit(f"summarise_twin.py failed:\n{res.stderr}")
         out.append(tex.read_text())
         tex.unlink()
     else:

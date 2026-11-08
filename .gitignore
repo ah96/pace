@@ -13,7 +13,12 @@ venv/
 *.swp
 .DS_Store
 
-# Generated outputs
+# Generated outputs; the paper's result files in results/ are published
 build/
 data/
-results/
+results/*
+!results/README.md
+!results/plant_allpairs.csv
+!results/generated_allpairs.csv.gz
+!results/twin_episodes.csv
+!results/twin_missions.csv

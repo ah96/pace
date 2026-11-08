@@ -1,9 +1,8 @@
 """How the explanation cost grows with the size of the facility.
 
-The two hand-authored scenarios have nine waypoints each, so every runtime in
-the results table is measured on a graph small enough that any method looks
-instant. A facility is not nine waypoints, and the honest question is what the
-method costs when it is not.
+The plants of the results table have eleven zones each, so every runtime in
+it is measured on a graph small enough that any method looks instant. A large
+facility has many more, and the honest question is what the method costs then.
 
 This sweeps procedurally generated lattices (scenarios/synthetic.py) from 9 to
 several hundred waypoints and times one explanation per task, for PACE and for

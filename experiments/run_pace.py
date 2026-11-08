@@ -7,23 +7,21 @@ combination we run the PACE counterfactual engine + all baselines, compute
 metrics against operational ground truth, and save results to CSV.
 
 Example:
-    python experiments/run_pace.py --k 3 --output results/pace_results.csv
+    PYTHONPATH=. python experiments/run_pace.py --k 3 --output results/pace_results.csv
 
 For a quick smoke test:
-    python experiments/run_pace.py --smoke --output results/pace_smoke.csv
+    PYTHONPATH=. python experiments/run_pace.py --smoke --output results/pace_smoke.csv
 """
 
 from __future__ import annotations
 
 import argparse
-import random
 import time
 from pathlib import Path
 
 import pandas as pd
 
 from pace.affordance import AffordanceReasoner
-from pace.counterfactual import DEFAULT_PRIORITY
 from pace.navigation import AStarPlanner
 from pace.evaluation import (
     compute_metrics,
@@ -38,29 +36,16 @@ from pace.evaluation import (
 )
 from scenarios.plant import build_plant_world, build_random_plant
 
-#: Baselines, plus their actionability-filtered variants. The ``-act`` forms
-#: rank the same way but only over properties a user can change, which is the
-#: ablation separating PACE's search from its knowledge of that split.
-_BASELINES = ("random", "distance", "semantic", "occupancy", "unconstrained",
-              "recourse")
+#: The baselines of the paper (Sec. 5).
+_BASELINES = ("random", "semantic", "unconstrained", "recourse")
 
-#: Ablations of PACE itself, which isolate the parts of the method that are
-#: declared rather than computed. ``pace-noattr`` generates candidates only from
-#: hard blockers, as the method did before cost attribution; ``pace-rndprio``
-#: keeps the full generator but shuffles the priority order, so what survives
-#: the shuffle is what verification rather than the ordering is responsible for;
-#: ``pace-pooled`` pools repair and saving claims into one ranked list, the
-#: design before the two were separated, which is the ablation that reproduces
-#: the labelling failure the separation exists to prevent.
-_ABLATIONS = ("pace-noattr", "pace-rndprio", "pace-pooled")
+#: Ablations of PACE itself. ``pace-noattr`` generates candidates only from
+#: hard blockers, as the method did before cost attribution; ``pace-pooled``
+#: ranks repair and saving claims in one list, the design before the two were
+#: separated, which reproduces the labelling failure the separation prevents.
+_ABLATIONS = ("pace-noattr", "pace-pooled")
 
-SUPPORTED_METHODS = ({"pace", "pace-opt"} | set(_ABLATIONS) | set(_BASELINES)
-                     | {b + "-act" for b in _BASELINES}
-                     # The set-search form of the excuse baseline: exhaustive
-                     # ascending-cardinality enumeration, run separately because
-                     # its cost is measured in seconds per task, not
-                     # milliseconds.
-                     | {"unconstrained-sets"})
+SUPPORTED_METHODS = {"pace", "pace-opt"} | set(_ABLATIONS) | set(_BASELINES)
 
 
 def _all_pairs(graph, agents):
@@ -129,19 +114,11 @@ def predict(method, graph, agent, reasoner, start, goal, k, seed, stats=None):
     differ from the authored one in how a method is invoked.
     """
     if method in ("pace", "pace-opt") or method in _ABLATIONS:
-        order = None
-        if method == "pace-rndprio":
-            # Seeded per task, so the permutation is a different one for every
-            # task rather than one unlucky order applied to all.
-            order = list(DEFAULT_PRIORITY)
-            random.Random(hash((seed, agent.name, start, goal))
-                          & 0xFFFFFFFF).shuffle(order)
         return predict_pace(
             graph, agent, start, goal, reasoner, k=k,
             search="min_cardinality" if method == "pace-opt" else "greedy",
             stats=stats,
             attribute_costs=method != "pace-noattr",
-            priority_order=order,
             separate_claims=method != "pace-pooled",
         )
     return run_baseline(method=method, graph=graph, agent=agent,
@@ -178,15 +155,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--methods",
         nargs="+",
-        default=["pace", "pace-opt", "pace-noattr", "pace-rndprio", "pace-pooled",
-                 "semantic", "distance", "occupancy",
-                 "random", "unconstrained", "recourse",
-                 "semantic-act", "unconstrained-act", "random-act",
-                 "distance-act", "occupancy-act", "recourse-act"],
+        default=["pace", "pace-opt", "pace-noattr", "pace-pooled",
+                 "recourse", "unconstrained", "semantic", "random"],
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", type=str, default="results/pace_results.csv")
-    parser.add_argument("--smoke", action="store_true", help="Run first two tasks per scenario.")
+    parser.add_argument("--smoke", action="store_true", help="Run only the first few tasks per scenario.")
     parser.add_argument("--all-pairs", action="store_true",
                         help="Sweep every connected (robot, start, goal) instead "
                              "of the hand-picked tasks.")

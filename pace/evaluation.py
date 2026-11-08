@@ -418,7 +418,8 @@ def predict_pace(
 # the width of the robot that has to fit through it. The targets are derived
 # from the same NavCostConfig predicates the counterfactual engine uses, so the
 # baselines are offered exactly the repairs PACE could propose.
-STRUCTURAL_PROPERTIES = {"width", "height", "slope_angle", "item_width", "item_mass"}
+# A tuple, not a set: candidate order must not depend on PYTHONHASHSEED.
+STRUCTURAL_PROPERTIES = ("width", "height", "slope_angle", "item_width", "item_mass")
 
 
 def _structural_cf_value(
@@ -508,15 +509,6 @@ def repairable(
     return result.is_feasible
 
 
-def _all_actionable_candidates(
-    graph:    NavigationGraph,
-    reasoner: AffordanceReasoner,
-    agent:    OntologyIndividual,
-) -> List[Tuple[OntologyIndividual, str]]:
-    """Backwards-compatible view of the full space as (individual, property) pairs."""
-    return [(ind, prop) for ind, prop, _ in candidate_space(graph, agent, reasoner)]
-
-
 def _factor(
     ind:     OntologyIndividual,
     prop:    str,
@@ -546,46 +538,6 @@ def baseline_random(
     rng.shuffle(candidates)
     return [_factor(ind, prop, val, utility=float(len(candidates) - i))
             for i, (ind, prop, val) in enumerate(candidates[:k])]
-
-
-def baseline_distance(
-    graph:    NavigationGraph,
-    agent:    OntologyIndividual,
-    reasoner: AffordanceReasoner,
-    start:    str,
-    k:        int,
-) -> List[ExplanationFactor]:
-    """Rank candidates by minimum edge distance from start."""
-    planner  = AStarPlanner(graph, reasoner)
-    baseline = planner.find_path(start, list(graph.nodes.keys())[-1], agent)
-
-    # BFS distance from start (in terms of graph hops)
-    from collections import deque
-    dist: Dict[str, float] = {start: 0.0}
-    queue = deque([start])
-    while queue:
-        cur = queue.popleft()
-        for edge in graph.neighbors(cur):
-            if edge.to_id not in dist:
-                dist[edge.to_id] = dist[cur] + edge.distance
-                queue.append(edge.to_id)
-
-    candidates = candidate_space(graph, agent, reasoner)
-
-    def min_dist_to_start(ind: OntologyIndividual) -> float:
-        for edge_list in graph.edges.values():
-            for edge in edge_list:
-                if edge.space_individual.name == ind.name:
-                    d = min(
-                        dist.get(edge.from_id, math.inf),
-                        dist.get(edge.to_id,   math.inf),
-                    )
-                    return d
-        return math.inf
-
-    ranked = sorted(candidates, key=lambda x: min_dist_to_start(x[0]))
-    return [_factor(ind, prop, val, utility=-min_dist_to_start(ind))
-            for ind, prop, val in ranked[:k]]
 
 
 def baseline_semantic(
@@ -627,28 +579,6 @@ def baseline_semantic(
     candidates = candidate_space(graph, agent, reasoner)
     ranked = sorted(candidates, key=lambda x: score(x[0]), reverse=True)
     return [_factor(ind, prop, val, utility=score(ind))
-            for ind, prop, val in ranked[:k]]
-
-
-def baseline_occupancy(
-    graph:    NavigationGraph,
-    agent:    OntologyIndividual,
-    reasoner: AffordanceReasoner,
-    start:    str,
-    goal:     str,
-    k:        int,
-) -> List[ExplanationFactor]:
-    """Rank by overlap between the individual's edges and the shortest path."""
-    planner  = AStarPlanner(graph, reasoner)
-    baseline = planner.find_path(start, goal, agent)
-    path_spaces = {e.space_individual.name for e in baseline.edges}
-
-    def overlap(ind: OntologyIndividual) -> int:
-        return 1 if ind.name in path_spaces else 0
-
-    candidates = candidate_space(graph, agent, reasoner)
-    ranked = sorted(candidates, key=lambda x: overlap(x[0]), reverse=True)
-    return [_factor(ind, prop, val, utility=float(overlap(ind)))
             for ind, prop, val in ranked[:k]]
 
 
@@ -695,87 +625,6 @@ def baseline_unconstrained(
 
     candidates_raw.sort(key=lambda f: f.utility, reverse=True)
     return candidates_raw[:k]
-
-
-def baseline_unconstrained_sets(
-    graph:    NavigationGraph,
-    agent:    OntologyIndividual,
-    reasoner: AffordanceReasoner,
-    start:    str,
-    goal:     str,
-    k:        int,
-    max_cardinality: int = 3,
-) -> List[ExplanationFactor]:
-    """Excuse search over change *sets*: exhaustive ascending-cardinality
-    enumeration of the full change space, each set verified by re-planning.
-
-    This is the fair form of the excuse baseline for conjunctive repairs, where
-    :func:`baseline_unconstrained` is handicapped by construction: excuse
-    generation in the literature is not restricted to single changes, so a
-    comparison that restricts it cannot say whether PACE's advantage is the
-    formulation or the handicap. The search embeds no domain insight -- no
-    attribution, no restriction to the questioned routes -- and pays full price
-    for it: every subset of the change space up to ``max_cardinality`` is a
-    candidate, so the cost is O(|space|^cardinality) re-plans.
-
-    Sets pay off only where no single change restores feasibility. On a
-    feasible task this reduces to the single-change search (enumerating subsets
-    for cost savings squares an already-quadratic bill for no new claim), and
-    where no set within the budget restores the route it returns nothing,
-    exactly as an excuse generator with a budget must.
-    """
-    planner  = AStarPlanner(graph, reasoner)
-    baseline = planner.find_path(start, goal, agent)
-    if baseline.is_feasible:
-        return baseline_unconstrained(graph, agent, reasoner, start, goal, k)
-
-    candidates = candidate_space(graph, agent, reasoner)
-    if any_restoring_single(graph, agent, reasoner, start, goal, candidates,
-                            planner):
-        return baseline_unconstrained(graph, agent, reasoner, start, goal, k)
-
-    def replan_with(combo) -> NavPath:
-        # One clone per touched individual, all its mutations applied to it.
-        originals: Dict[str, OntologyIndividual] = {}
-        clones:    Dict[str, OntologyIndividual] = {}
-        for ind, prop, val in combo:
-            if ind.name not in clones:
-                originals[ind.name] = ind
-                clones[ind.name]    = ind.clone()
-            clones[ind.name].set(prop, val)
-        for name, clone in clones.items():
-            _swap_individual(graph, name, clone)
-        result = planner.find_path(start, goal, agent)
-        for name, clone in clones.items():
-            _swap_individual(graph, clone.name, originals[name])
-        return result
-
-    from itertools import combinations
-    for cardinality in range(2, max_cardinality + 1):
-        best, best_cost = None, math.inf
-        for combo in combinations(candidates, cardinality):
-            result = replan_with(combo)
-            if result.is_feasible and result.total_cost < best_cost:
-                best, best_cost = combo, result.total_cost
-        if best is not None:
-            return [_factor(ind, prop, val, utility=1000.0 - i)
-                    for i, (ind, prop, val) in enumerate(best)]
-    return []
-
-
-def any_restoring_single(
-    graph, agent, reasoner, start, goal, candidates, planner,
-) -> bool:
-    """Whether any single change in ``candidates`` makes the task planable."""
-    for ind, prop, val in candidates:
-        clone = ind.clone()
-        clone.set(prop, val)
-        _swap_individual(graph, ind.name, clone)
-        result = planner.find_path(start, goal, agent)
-        _swap_individual(graph, clone.name, ind)
-        if result.is_feasible:
-            return True
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -968,9 +817,7 @@ def baseline_recourse(
         return chosen
 
     # Diverse counterfactuals: each search runs without the pairs already used.
-    # *max_sets* bounds how many are looked for, which matters only for the
-    # actionability-filtered variant, where k is effectively unbounded so that
-    # filtering happens before truncation rather than after.
+    # *max_sets* bounds how many are looked for.
     factors: List[ExplanationFactor] = []
     banned:  Set[Tuple[str, str]] = set()
     for _ in range(max_sets):
@@ -990,16 +837,6 @@ def baseline_recourse(
     return factors
 
 
-#: Suffix marking an actionability-filtered variant of a baseline, e.g.
-#: ``semantic-act``. See :func:`run_baseline`.
-ACTIONABLE_SUFFIX = "-act"
-
-#: Effectively "rank the whole space", so filtering happens before truncation
-#: rather than after. Filtering a top-k list would leave fewer than k
-#: recommendations for reasons that have nothing to do with the method.
-_ALL = 10 ** 6
-
-
 def run_baseline(
     method:   str,
     graph:    NavigationGraph,
@@ -1011,43 +848,16 @@ def run_baseline(
     seed:     int,
     epsilon:  float = 1.0,
 ) -> List[ExplanationFactor]:
-    """Dispatch a baseline by name.
-
-    A ``-act`` suffix runs the same ranking restricted to
-    :data:`ACTIONABLE_PROPERTIES`. This is the ablation that separates two
-    explanations of PACE's low actionable fraction on structural tasks: whether
-    it comes from the search, or merely from being the only method allowed to
-    know which properties a user can change. The filtered variant ranks the full space
-    first and truncates after filtering, so it still returns k suggestions
-    wherever k actionable candidates exist.
-    """
-    filtered = method.endswith(ACTIONABLE_SUFFIX)
-    base = method[: -len(ACTIONABLE_SUFFIX)] if filtered else method
-    want = _ALL if filtered else k
-
-    if base == "random":
-        out = baseline_random(graph, agent, reasoner, want, seed)
-    elif base == "distance":
-        out = baseline_distance(graph, agent, reasoner, start, want)
-    elif base == "semantic":
-        out = baseline_semantic(graph, agent, reasoner, start, goal, want)
-    elif base == "occupancy":
-        out = baseline_occupancy(graph, agent, reasoner, start, goal, want)
-    elif base == "unconstrained":
-        out = baseline_unconstrained(graph, agent, reasoner, start, goal, want)
-    elif base == "unconstrained-sets":
-        out = baseline_unconstrained_sets(graph, agent, reasoner, start, goal,
-                                          want if want is not _ALL else 3)
-    elif base == "recourse":
-        out = baseline_recourse(graph, agent, reasoner, start, goal, want,
-                               epsilon=epsilon)
-    else:
-        raise ValueError(f"Unknown baseline: {method}")
-
-    if filtered:
-        out = [f for f in out if f.actionable][:k]
-    return out
-
+    """Dispatch a baseline of the paper by name."""
+    if method == "random":
+        return baseline_random(graph, agent, reasoner, k, seed)
+    if method == "semantic":
+        return baseline_semantic(graph, agent, reasoner, start, goal, k)
+    if method == "unconstrained":
+        return baseline_unconstrained(graph, agent, reasoner, start, goal, k)
+    if method == "recourse":
+        return baseline_recourse(graph, agent, reasoner, start, goal, k, epsilon=epsilon)
+    raise ValueError(f"Unknown baseline: {method}")
 
 
 # ---------------------------------------------------------------------------

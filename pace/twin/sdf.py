@@ -438,49 +438,6 @@ def object_model(o: "Look") -> str:
     return generic_model(o)
 
 
-def board_visuals(o: "Look") -> str:
-    """A whiteboard on two posts, its face across the shorter footprint side."""
-    along_y = o.dy >= o.dx
-    parts = []
-    for s_ in (-1, 1):
-        x, y = (0, s_ * (o.dy / 2 - 0.05)) if along_y else (s_ * (o.dx / 2 - 0.05), 0)
-        parts.append(cylinder_visual(f"post{s_ + 1}", f"{x:.3f} {y:.3f} 0.95 0 0 0", 0.025, 1.9, material("#4a4b4d")))
-        parts.append(box_visual(f"foot{s_ + 1}", f"{x:.3f} {y:.3f} 0.02 0 0 0",
-                                (0.06, 0.5, 0.04) if along_y else (0.5, 0.06, 0.04), material("#4a4b4d")))
-    size = (0.04, o.dy, 1.0) if along_y else (o.dx, 0.04, 1.0)
-    parts.append(box_visual("board", "0 0 1.4 0 0 0", size, material("#f2f2ee")))
-    parts.append(box_visual("frame", "0 0 1.4 0 0 0", (size[0] + 0.02, size[1] + 0.04, 1.06) if along_y
-                            else (size[0] + 0.04, size[1] + 0.02, 1.06), material("#9a9a98")))
-    return "".join(parts)
-
-
-def counter_visuals(o: "Look") -> str:
-    """A reception or library counter: a wooden body with a lighter top slab."""
-    h = o.height
-    return "".join([box_visual("body", f"0 0 {(h - 0.04) / 2:.4f} 0 0 0", (o.dx - 0.06, o.dy - 0.06, h - 0.04),
-                               material("#8e7a66")),
-                    box_visual("top", f"0 0 {h - 0.02:.4f} 0 0 0", (o.dx, o.dy, 0.04), material("#c9b697")),
-                    box_visual("kick", "0 0 0.05 0 0 0", (o.dx - 0.16, o.dy - 0.16, 0.1), material("#4a4540"))])
-
-
-def bed_visuals(o: "Look") -> str:
-    """A hospital bed: frame, mattress, pillow, a rail on each long side."""
-    L, W = max(o.dx, o.dy), min(o.dx, o.dy)
-    along_x = o.dx >= o.dy
-    def sz(a, b, c):
-        return (a, b, c) if along_x else (b, a, c)
-    parts = [box_visual("frame", "0 0 0.25 0 0 0", sz(L, W, 0.3), material("#b8bcc2")),
-             box_visual("mattress", "0 0 0.48 0 0 0", sz(L - 0.1, W - 0.1, 0.16), material("#e9edf2")),
-             box_visual("blanket", f"{-0.15 if along_x else 0:.2f} {0 if along_x else -0.15:.2f} 0.57 0 0 0",
-                        sz(L * 0.6, W - 0.12, 0.04), material("#7fa7c9")),
-             box_visual("pillow", f"{L / 2 - 0.3 if along_x else 0:.2f} {0 if along_x else L / 2 - 0.3:.2f} 0.6 0 0 0",
-                        sz(0.4, W - 0.3, 0.1), material("#ffffff"))]
-    for s_ in (-1, 1):
-        x, y = (0, s_ * (W / 2 - 0.02)) if along_x else (s_ * (W / 2 - 0.02), 0)
-        parts.append(box_visual(f"rail{s_ + 1}", f"{x:.3f} {y:.3f} 0.75 0 0 0", sz(L * 0.6, 0.03, 0.3), material("#b8bcc2")))
-    return "".join(parts)
-
-
 def cart_visuals(o: "Look") -> str:
     """A service trolley: four posts on castors, two shelves with books, a push handle.
     (Built here because the Fuel Utility Cart is a rover.)"""
@@ -510,7 +467,7 @@ def cart_visuals(o: "Look") -> str:
     return "".join(parts)
 
 
-PROCEDURAL = {"whiteboard": board_visuals, "counter": counter_visuals, "bed": bed_visuals, "cart": cart_visuals}
+PROCEDURAL = {"cart": cart_visuals}
 
 
 def generic_model(o: "Look", colour: str = "#a39d94") -> str:
